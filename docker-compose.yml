@@ -70,3 +70,8 @@ volumes:
 networks:
   bot-network:
     driver: bridge
+
+
+
+
+

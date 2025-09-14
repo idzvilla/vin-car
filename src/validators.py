@@ -171,3 +171,8 @@ class MessageValidator:
             return False, f"Файл слишком большой (максимум {max_size_mb} МБ)"
         
         return True, None
+
+
+
+
+

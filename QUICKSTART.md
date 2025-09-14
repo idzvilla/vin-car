@@ -211,3 +211,8 @@ sqlite3 data/vin_reports.db "SELECT id, vin, status, created_at FROM tickets ORD
 ---
 
 **Готово!** 🎉 Ваш VIN Report Bot готов к работе!
+
+
+
+
+

@@ -190,3 +190,8 @@ class ManagerKeyboards:
         
         logger.debug("Создана клавиатура действий менеджера")
         return keyboard
+
+
+
+
+

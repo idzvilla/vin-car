@@ -105,3 +105,8 @@ class Ticket(Base):
     def can_be_done(self) -> bool:
         """Проверка, можно ли завершить заявку."""
         return self.status in ("NEW", "TAKEN")
+
+
+
+
+

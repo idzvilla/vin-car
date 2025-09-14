@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 from typing import Optional
 
@@ -49,52 +50,56 @@ async def handle_take_ticket(callback: CallbackQuery, bot: Bot) -> None:
     manager_username = callback.from_user.username or f"manager_{manager_id}"
     
     try:
-        async with get_db_session() as session:
-            # Поиск заявки
-            result = await session.execute(
-                select(Ticket).where(Ticket.id == ticket_id)
+        from src.db_adapter import db_adapter
+        
+        # Получение заявки с повторными попытками
+        ticket_data = None
+        for attempt in range(3):
+            ticket_data = await db_adapter.get_ticket(ticket_id)
+            if ticket_data:
+                break
+            await asyncio.sleep(0.2)  # Небольшая задержка между попытками
+        
+        if not ticket_data:
+            await callback.answer("❌ Заявка не найдена. Попробуйте через несколько секунд.")
+            return
+        
+        # Проверка статуса заявки
+        if ticket_data['status'] != 'NEW':
+            await callback.answer("❌ Заявка уже назначена или завершена.")
+            return
+        
+        # Назначение заявки
+        await db_adapter.update_ticket_status(ticket_id, "TAKEN", manager_id)
+        
+        logger.info(
+            "Заявка назначена менеджеру",
+            ticket_id=ticket_id,
+            manager_id=manager_id,
+            manager_username=manager_username
+        )
+        
+        # Обновление сообщения
+        if callback.message:
+            from datetime import datetime
+            created_at = datetime.fromisoformat(ticket_data['created_at'].replace('Z', '+00:00'))
+            
+            updated_text = (
+                f"🆕 <b>Новая заявка №{ticket_data['id']}</b>\n\n"
+                f"👤 <b>От:</b> @{manager_username} (ID: {ticket_data['user_id']})\n"
+                f"🚗 <b>VIN:</b> <code>{ticket_data['vin']}</code>\n"
+                f"📅 <b>Создана:</b> {created_at.strftime('%d.%m.%Y %H:%M')}\n"
+                f"📊 <b>Статус:</b> назначена\n"
+                f"👨‍💼 <b>Назначена:</b> @{manager_username}"
             )
-            ticket = result.scalar_one_or_none()
             
-            if not ticket:
-                await callback.answer("❌ Заявка не найдена.")
-                return
-            
-            # Проверка статуса заявки
-            if not ticket.can_be_taken():
-                await callback.answer("❌ Заявка уже назначена или завершена.")
-                return
-            
-            # Назначение заявки
-            ticket.status = "TAKEN"
-            ticket.assignee_id = manager_id
-            await session.commit()
-            
-            logger.info(
-                "Заявка назначена менеджеру",
-                ticket_id=ticket_id,
-                manager_id=manager_id,
-                manager_username=manager_username
+            await callback.message.edit_text(
+                text=updated_text,
+                reply_markup=TicketKeyboards.get_taken_keyboard(ticket_id),
+                parse_mode="HTML"
             )
-            
-            # Обновление сообщения
-            if callback.message:
-                updated_text = (
-                    f"🆕 <b>Новая заявка №{ticket.id}</b>\n\n"
-                    f"👤 <b>От:</b> @{manager_username} (ID: {ticket.user_id})\n"
-                    f"🚗 <b>VIN:</b> <code>{ticket.vin}</code>\n"
-                    f"📅 <b>Создана:</b> {ticket.created_at.strftime('%d.%m.%Y %H:%M')}\n"
-                    f"📊 <b>Статус:</b> назначена\n"
-                    f"👨‍💼 <b>Назначена:</b> @{manager_username}"
-                )
-                
-                await callback.message.edit_text(
-                    text=updated_text,
-                    reply_markup=TicketKeyboards.get_taken_keyboard(ticket_id),
-                    parse_mode="HTML"
-                )
-            
-            await callback.answer("✅ Заявка назначена вам!")
+        
+        await callback.answer("✅ Заявка назначена вам!")
             
     except Exception as e:
         logger.error(

@@ -36,14 +36,14 @@ class VINReportBot:
             self._setup_logging()
             
             # Инициализация базы данных
-            await init_db()
+            from src.db_adapter import db_adapter
+            await db_adapter.initialize()
             
             # Создание бота
             self.bot = Bot(
                 token=settings.bot_token,
                 default=DefaultBotProperties(
-                    parse_mode=ParseMode.HTML,
-                    disable_web_page_preview=True
+                    parse_mode=ParseMode.HTML
                 )
             )
             
@@ -59,7 +59,7 @@ class VINReportBot:
             logger.info("VIN Report Bot инициализирован успешно")
             
         except Exception as e:
-            logger.error("Ошибка инициализации бота", error=str(e))
+            logger.error("Ошибка инициализации бота", error=str(e), exc_info=True)
             raise
     
     async def start(self) -> None:
@@ -69,6 +69,15 @@ class VINReportBot:
         
         try:
             logger.info("Запуск VIN Report Bot")
+            
+            # Проверяем доступность чата менеджеров
+            try:
+                chat_info = await self.bot.get_chat(settings.manager_chat_id)
+                logger.info(f"✅ Чат менеджеров доступен: {chat_info.title} (ID: {settings.manager_chat_id})")
+            except Exception as e:
+                logger.error(f"❌ КРИТИЧЕСКАЯ ОШИБКА: Чат менеджеров недоступен (ID: {settings.manager_chat_id})", 
+                            error=str(e))
+                logger.error("Бот запущен, но заявки не будут отправляться в группу менеджеров!")
             
             # Получение информации о боте
             bot_info = await self.bot.get_me()

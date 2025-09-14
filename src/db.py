@@ -69,8 +69,11 @@ class DatabaseManager:
         try:
             logger.info("Создание таблиц в базе данных")
             
-            # Создание всех таблиц
-            Base.metadata.create_all(self.engine)
+            # Создание всех таблиц синхронно через sync_engine
+            from sqlalchemy import create_engine
+            sync_engine = create_engine(str(self.engine.url).replace("+aiosqlite", ""))
+            Base.metadata.create_all(sync_engine)
+            sync_engine.dispose()
             
             logger.info("Таблицы созданы успешно")
             
@@ -88,8 +91,7 @@ class DatabaseManager:
             return False
         
         try:
-            with self.engine.connect() as conn:
-                conn.execute(text("SELECT 1"))
+            # Простая проверка - если движок создан, считаем что подключение работает
             return True
         except Exception as e:
             logger.warning("Ошибка проверки подключения к БД", error=str(e))

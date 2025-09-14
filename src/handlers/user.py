@@ -91,6 +91,65 @@ async def cmd_help(message: Message, bot: Bot) -> None:
     )
 
 
+@user_router.message(F.document)
+async def handle_document_reply(message: Message, bot: Bot) -> None:
+    """Обработчик документов в ответ на карточку заявки."""
+    # Проверка, что сообщение в чате менеджеров
+    if message.chat.id != settings.manager_chat_id:
+        return
+    
+    # Проверка, что это ответ на сообщение
+    if not message.reply_to_message:
+        await message.answer(
+            "❌ <b>Ошибка</b>\n\n"
+            "Для завершения заявки отправьте PDF <b>в ответ</b> на карточку заявки.",
+            parse_mode="HTML"
+        )
+        return
+    
+    # Извлечение номера заявки из текста сообщения, на которое отвечают
+    replied_text = message.reply_to_message.text or ""
+    ticket_id_match = re.search(r"заявка №(\d+)", replied_text, re.IGNORECASE)
+    
+    if not ticket_id_match:
+        await message.answer(
+            "❌ <b>Ошибка</b>\n\n"
+            "Не удалось найти номер заявки в сообщении.",
+            parse_mode="HTML"
+        )
+        return
+    
+    try:
+        ticket_id = int(ticket_id_match.group(1))
+    except ValueError:
+        await message.answer(
+            "❌ <b>Ошибка</b>\n\n"
+            "Неверный формат номера заявки.",
+            parse_mode="HTML"
+        )
+        return
+    
+    # Проверка типа файла
+    if not message.document.file_name or not message.document.file_name.lower().endswith('.pdf'):
+        await message.answer(
+            "❌ <b>Ошибка типа файла</b>\n\n"
+            "Пожалуйста, отправьте PDF документ.",
+            parse_mode="HTML"
+        )
+        return
+    
+    # Проверка размера файла (50 МБ)
+    if message.document.file_size > 50 * 1024 * 1024:
+        await message.answer(
+            "❌ <b>Ошибка размера файла</b>\n\n"
+            "Максимальный размер файла: 50 МБ",
+            parse_mode="HTML"
+        )
+        return
+    
+    # Обработка заявки
+    await _process_ticket_completion(bot, message, ticket_id, message.document)
+
 @user_router.message(F.text)
 async def handle_vin_message(message: Message, bot: Bot) -> None:
     """Обработчик текстовых сообщений с VIN номерами.
@@ -119,103 +178,198 @@ async def handle_vin_message(message: Message, bot: Bot) -> None:
     # Нормализация VIN
     normalized_vin = VINValidator.normalize(text)
     
+    # Создание заявки через db_adapter
+    from src.db_adapter import db_adapter
+    
+    # Инициализация переменной для отправки в группу
+    ticket_data = None
+    
     try:
-        # Создание заявки
-        async with get_db_session() as session:
-            # Проверка на дублирование
-            existing_ticket = await session.execute(
-                select(Ticket).where(
-                    Ticket.vin == normalized_vin,
-                    Ticket.user_id == user_id,
-                    Ticket.status.in_(["NEW", "TAKEN"])
-                )
-            )
-            existing_ticket = existing_ticket.scalar_one_or_none()
-            
-            if existing_ticket:
-                await message.answer(
-                    f"⚠️ <b>Заявка уже существует</b>\n\n"
-                    f"Заявка №{existing_ticket.id} с VIN <code>{normalized_vin}</code> "
-                    f"уже обрабатывается.\n\n"
-                    f"📊 <b>Статус:</b> {_get_status_text(existing_ticket.status)}",
-                    parse_mode="HTML"
-                )
-                return
-            
-            # Создание новой заявки
-            ticket = Ticket(
-                vin=normalized_vin,
-                user_id=user_id,
-                status="NEW"
-            )
-            session.add(ticket)
-            await session.commit()
-            await session.refresh(ticket)
-            
-            logger.info(
-                "Создана новая заявка",
-                ticket_id=ticket.id,
-                user_id=user_id,
-                vin=normalized_vin
-            )
-            
-            # Уведомление пользователя
-            await message.answer(
-                f"✅ <b>Заявка принята!</b>\n\n"
-                f"🆔 <b>Номер заявки:</b> #{ticket.id}\n"
-                f"🚗 <b>VIN:</b> <code>{normalized_vin}</code>\n"
-                f"📊 <b>Статус:</b> в работе\n\n"
-                f"⏰ <b>Время обработки:</b> 5-30 минут\n"
-                f"📄 <b>Отчет будет отправлен</b> в личные сообщения",
-                parse_mode="HTML"
-            )
-            
-            # Отправка карточки заявки в чат менеджеров
-            await _send_ticket_to_managers(bot, ticket, username)
-            
+        # Создание новой заявки
+        logger.debug("Начинаем создание заявки", user_id=user_id, vin=normalized_vin, username=username)
+        ticket_data = await db_adapter.create_ticket(normalized_vin, user_id, username)
+        logger.debug("Заявка создана в базе данных", ticket_data=ticket_data)
+        
+        logger.info(
+            "Создана новая заявка",
+            ticket_id=ticket_data["id"],
+            user_id=user_id,
+            vin=normalized_vin
+        )
+        
+        # Уведомление пользователя
+        logger.debug("Отправляем уведомление пользователю", user_id=user_id, ticket_id=ticket_data['id'])
+        await message.answer(
+            f"✅ <b>Заявка принята!</b>\n\n"
+            f"🆔 <b>Номер заявки:</b> #{ticket_data['id']}\n"
+            f"🚗 <b>VIN:</b> <code>{normalized_vin}</code>\n"
+            f"📊 <b>Статус:</b> в работе\n\n"
+            f"⏰ <b>Время обработки:</b> 5-30 минут\n"
+            f"📄 <b>Отчет будет отправлен</b> в личные сообщения",
+            parse_mode="HTML"
+        )
+        logger.debug("Уведомление пользователю отправлено успешно", user_id=user_id)
+        
     except Exception as e:
-        logger.error("Ошибка создания заявки", user_id=user_id, error=str(e))
+        logger.error("Ошибка создания заявки", user_id=user_id, error=str(e), exc_info=True)
         await message.answer(
             "❌ <b>Произошла ошибка</b>\n\n"
             "Не удалось создать заявку. Попробуйте позже или обратитесь в поддержку.",
             parse_mode="HTML"
         )
-
-
-async def _send_ticket_to_managers(bot: Bot, ticket: Ticket, username: str) -> None:
-    """Отправка карточки заявки в чат менеджеров.
+        return
     
-    Args:
-        bot: Экземпляр бота
-        ticket: Заявка
-        username: Имя пользователя
-    """
+    # Отправка в группу менеджеров
+    if ticket_data is not None:
+        await _send_ticket_to_managers(bot, ticket_data, username)
+
+
+async def _send_ticket_to_managers(bot: Bot, ticket_data: dict, username: str) -> None:
+    """Отправка карточки заявки в чат менеджеров."""
     try:
         ticket_text = (
-            f"🆕 <b>Новая заявка №{ticket.id}</b>\n\n"
-            f"👤 <b>От:</b> @{username} (ID: {ticket.user_id})\n"
-            f"🚗 <b>VIN:</b> <code>{ticket.vin}</code>\n"
-            f"📅 <b>Создана:</b> {ticket.created_at.strftime('%d.%m.%Y %H:%M')}\n"
-            f"📊 <b>Статус:</b> новая"
+            f"<b>🚗 Новая заявка на VIN-отчет</b>\n\n"
+            f"<b>ID заявки:</b> #{ticket_data['id']}\n"
+            f"<b>VIN:</b> <code>{ticket_data['vin']}</code>\n"
+            f"<b>Пользователь:</b> @{username}\n"
+            f"<b>Статус:</b> {ticket_data['status']}\n\n"
+            f"<i>Нажмите кнопку ниже, чтобы взять заявку в работу</i>"
         )
         
         await bot.send_message(
             chat_id=settings.manager_chat_id,
             text=ticket_text,
-            reply_markup=TicketKeyboards.get_take_keyboard(ticket.id),
+            reply_markup=TicketKeyboards.get_take_keyboard(ticket_data['id']),
+            parse_mode="HTML"
+        )
+        
+        logger.info("✅ Заявка отправлена в группу менеджеров", ticket_id=ticket_data['id'])
+        
+    except Exception as e:
+        logger.error("Ошибка отправки заявки менеджерам", error=str(e))
+
+
+async def _process_ticket_completion(bot: Bot, message: Message, ticket_id: int, document) -> None:
+    """Обработка завершения заявки."""
+    from src.db_adapter import db_adapter
+    
+    manager_id = message.from_user.id
+    manager_username = message.from_user.username or f"manager_{manager_id}"
+    
+    try:
+        logger.debug("Начало обработки завершения заявки", ticket_id=ticket_id, manager_id=manager_id)
+        
+        # Получение заявки
+        ticket_data = await db_adapter.get_ticket(ticket_id)
+        logger.debug("Заявка получена из базы", ticket_data=ticket_data)
+        
+        if not ticket_data:
+            await message.answer(
+                f"❌ <b>Заявка не найдена</b>\n\n"
+                f"Заявка №{ticket_id} не существует.",
+                parse_mode="HTML"
+            )
+            return
+        
+        # Проверка статуса заявки
+        if ticket_data['status'] == "DONE":
+            await message.answer(
+                f"⚠️ <b>Заявка уже завершена</b>\n\n"
+                f"Заявка №{ticket_id} уже была закрыта.",
+                parse_mode="HTML"
+            )
+            return
+        
+        # Обновление статуса заявки
+        logger.debug("Обновление статуса заявки", ticket_id=ticket_id, status="DONE", assignee_id=manager_id)
+        await db_adapter.update_ticket_status(ticket_id, "DONE", manager_id)
+        
+        logger.info(
+            "Заявка завершена менеджером",
+            ticket_id=ticket_id,
+            manager_id=manager_id,
+            manager_username=manager_username
+        )
+        
+        # Отправка отчета пользователю
+        logger.debug("Отправка отчета пользователю", ticket_id=ticket_id, user_id=ticket_data['user_id'])
+        await _send_report_to_user(bot, ticket_data, document)
+        
+        # Подтверждение менеджеру
+        logger.debug("Отправка подтверждения менеджеру", ticket_id=ticket_id)
+        await message.answer(
+            f"✅ <b>Отчет отправлен!</b>\n\n"
+            f"📄 Заявка №{ticket_id} закрыта\n"
+            f"👤 Отчет отправлен пользователю",
+            parse_mode="HTML"
+        )
+        
+        # Обновление карточки заявки (удаление кнопок)
+        if message.reply_to_message:
+            try:
+                await message.reply_to_message.edit_reply_markup(
+                    reply_markup=TicketKeyboards.get_empty_keyboard()
+                )
+            except Exception as e:
+                logger.warning("Не удалось обновить карточку заявки", error=str(e))
+            
+    except Exception as e:
+        logger.error(
+            "❌ КРИТИЧЕСКАЯ ОШИБКА завершения заявки",
+            ticket_id=ticket_id,
+            manager_id=manager_id,
+            error=str(e),
+            exc_info=True
+        )
+        
+        # Пытаемся отправить отчет пользователю даже при ошибке
+        try:
+            if 'ticket_data' in locals() and ticket_data:
+                await _send_report_to_user(bot, ticket_data, document)
+                logger.info("✅ Отчет отправлен пользователю несмотря на ошибку", 
+                           ticket_id=ticket_id)
+        except Exception as report_error:
+            logger.error("❌ Не удалось отправить отчет пользователю", 
+                        error=str(report_error))
+        
+        await message.answer(
+            "❌ <b>Произошла ошибка</b>\n\n"
+            "Не удалось завершить заявку. Попробуйте позже.",
+            parse_mode="HTML"
+        )
+
+
+async def _send_report_to_user(bot: Bot, ticket_data: dict, document) -> None:
+    """Отправка отчета пользователю."""
+    try:
+        # Уведомление о готовности отчета
+        await bot.send_message(
+            chat_id=ticket_data['user_id'],
+            text=f"✅ <b>Заявка №{ticket_data['id']}: отчет готов!</b>\n\n"
+                 f"🚗 <b>VIN:</b> <code>{ticket_data['vin']}</code>\n"
+                 f"📄 <b>Ваш отчет (PDF)</b> прикреплен к сообщению ниже.",
+            parse_mode="HTML"
+        )
+        
+        # Пересылка документа пользователю
+        await bot.send_document(
+            chat_id=ticket_data['user_id'],
+            document=document.file_id,
+            caption="📄 Ваш отчет по VIN номеру",
             parse_mode="HTML"
         )
         
         logger.info(
-            "Заявка отправлена менеджерам",
-            ticket_id=ticket.id,
-            manager_chat_id=settings.manager_chat_id
+            "Отчет отправлен пользователю",
+            ticket_id=ticket_data['id'],
+            user_id=ticket_data['user_id']
         )
         
     except Exception as e:
         logger.error(
-            "Ошибка отправки заявки менеджерам",
-            ticket_id=ticket.id,
+            "Ошибка отправки отчета пользователю",
+            ticket_id=ticket_data['id'],
+            user_id=ticket_data['user_id'],
             error=str(e)
         )
 

@@ -182,3 +182,8 @@ class TestMessageValidator:
         for size in invalid_sizes:
             is_valid, error = MessageValidator.validate_document_size(size)
             assert not is_valid, f"Размер {size} должен быть невалидным"
+
+
+
+
+

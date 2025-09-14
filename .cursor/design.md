@@ -129,3 +129,8 @@ CREATE TABLE tickets (
 - Webhook вместо polling
 - Горизонтальное масштабирование
 - Redis для кеширования
+
+
+
+
+

@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     """Настройки приложения."""
     
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file="env_config",
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -25,6 +25,20 @@ class Settings(BaseSettings):
     database_url: str = Field(
         default="sqlite:///./vin_reports.db",
         description="URL подключения к базе данных"
+    )
+    
+    # Supabase Configuration (optional)
+    use_supabase: bool = Field(
+        default=False,
+        description="Использовать Supabase вместо SQLite"
+    )
+    supabase_url: Optional[str] = Field(
+        default=None,
+        description="URL Supabase проекта"
+    )
+    supabase_key: Optional[str] = Field(
+        default=None,
+        description="API ключ Supabase"
     )
     
     # Logging Configuration

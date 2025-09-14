@@ -273,3 +273,8 @@ async def _send_report_to_user(bot: Bot, ticket: Ticket, document: Document) -> 
             user_id=ticket.user_id,
             error=str(e)
         )
+
+
+
+
+
