@@ -1,0 +1,272 @@
+"""Обработчики callback запросов."""
+
+from __future__ import annotations
+
+import re
+from typing import Optional
+
+from aiogram import Bot, Router
+from aiogram.types import CallbackQuery
+from loguru import logger
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ..db import get_db_session
+from ..keyboards import TicketKeyboards
+from ..models import Ticket
+from ..settings import settings
+
+# Роутер для callback'ов
+callback_router = Router()
+
+
+@callback_router.callback_query(lambda c: c.data.startswith("take_ticket:"))
+async def handle_take_ticket(callback: CallbackQuery, bot: Bot) -> None:
+    """Обработчик назначения заявки.
+    
+    Args:
+        callback: Callback запрос
+        bot: Экземпляр бота
+    """
+    # Проверка, что callback в чате менеджеров
+    if callback.message and callback.message.chat.id != settings.manager_chat_id:
+        await callback.answer("❌ Эта функция доступна только в чате менеджеров.")
+        return
+    
+    # Извлечение ID заявки
+    ticket_id_match = re.search(r"take_ticket:(\d+)", callback.data)
+    if not ticket_id_match:
+        await callback.answer("❌ Ошибка: неверный формат запроса.")
+        return
+    
+    try:
+        ticket_id = int(ticket_id_match.group(1))
+    except ValueError:
+        await callback.answer("❌ Ошибка: неверный номер заявки.")
+        return
+    
+    manager_id = callback.from_user.id
+    manager_username = callback.from_user.username or f"manager_{manager_id}"
+    
+    try:
+        async with get_db_session() as session:
+            # Поиск заявки
+            result = await session.execute(
+                select(Ticket).where(Ticket.id == ticket_id)
+            )
+            ticket = result.scalar_one_or_none()
+            
+            if not ticket:
+                await callback.answer("❌ Заявка не найдена.")
+                return
+            
+            # Проверка статуса заявки
+            if not ticket.can_be_taken():
+                await callback.answer("❌ Заявка уже назначена или завершена.")
+                return
+            
+            # Назначение заявки
+            ticket.status = "TAKEN"
+            ticket.assignee_id = manager_id
+            await session.commit()
+            
+            logger.info(
+                "Заявка назначена менеджеру",
+                ticket_id=ticket_id,
+                manager_id=manager_id,
+                manager_username=manager_username
+            )
+            
+            # Обновление сообщения
+            if callback.message:
+                updated_text = (
+                    f"🆕 <b>Новая заявка №{ticket.id}</b>\n\n"
+                    f"👤 <b>От:</b> @{manager_username} (ID: {ticket.user_id})\n"
+                    f"🚗 <b>VIN:</b> <code>{ticket.vin}</code>\n"
+                    f"📅 <b>Создана:</b> {ticket.created_at.strftime('%d.%m.%Y %H:%M')}\n"
+                    f"📊 <b>Статус:</b> назначена\n"
+                    f"👨‍💼 <b>Назначена:</b> @{manager_username}"
+                )
+                
+                await callback.message.edit_text(
+                    text=updated_text,
+                    reply_markup=TicketKeyboards.get_taken_keyboard(ticket_id),
+                    parse_mode="HTML"
+                )
+            
+            await callback.answer("✅ Заявка назначена вам!")
+            
+    except Exception as e:
+        logger.error(
+            "Ошибка назначения заявки",
+            ticket_id=ticket_id,
+            manager_id=manager_id,
+            error=str(e)
+        )
+        await callback.answer("❌ Произошла ошибка при назначении заявки.")
+
+
+@callback_router.callback_query(lambda c: c.data.startswith("done_hint:"))
+async def handle_done_hint(callback: CallbackQuery, bot: Bot) -> None:
+    """Обработчик подсказки о завершении заявки.
+    
+    Args:
+        callback: Callback запрос
+        bot: Экземпляр бота
+    """
+    # Проверка, что callback в чате менеджеров
+    if callback.message and callback.message.chat.id != settings.manager_chat_id:
+        await callback.answer("❌ Эта функция доступна только в чате менеджеров.")
+        return
+    
+    # Извлечение ID заявки
+    ticket_id_match = re.search(r"done_hint:(\d+)", callback.data)
+    if not ticket_id_match:
+        await callback.answer("❌ Ошибка: неверный формат запроса.")
+        return
+    
+    try:
+        ticket_id = int(ticket_id_match.group(1))
+    except ValueError:
+        await callback.answer("❌ Ошибка: неверный номер заявки.")
+        return
+    
+    hint_text = (
+        "📋 <b>Как завершить заявку:</b>\n\n"
+        "1️⃣ <b>Отправьте PDF в ответ</b> на карточку заявки\n"
+        "2️⃣ <b>Или используйте команду:</b> /done {ticket_id} + PDF\n\n"
+        "💡 <b>Важно:</b>\n"
+        "• Файл должен быть в формате PDF\n"
+        "• Максимальный размер: 50 МБ\n"
+        "• Отчет будет автоматически отправлен пользователю"
+    ).format(ticket_id=ticket_id)
+    
+    await callback.message.answer(
+        hint_text,
+        reply_markup=TicketKeyboards.get_done_hint_keyboard(ticket_id),
+        parse_mode="HTML"
+    )
+    
+    await callback.answer("💡 Инструкция отправлена!")
+
+
+@callback_router.callback_query(lambda c: c.data.startswith("send_pdf_hint:"))
+async def handle_send_pdf_hint(callback: CallbackQuery, bot: Bot) -> None:
+    """Обработчик подсказки об отправке PDF.
+    
+    Args:
+        callback: Callback запрос
+        bot: Экземпляр бота
+    """
+    await callback.answer("📤 Отправьте PDF в ответ на карточку заявки!")
+
+
+@callback_router.callback_query(lambda c: c.data.startswith("command_hint:"))
+async def handle_command_hint(callback: CallbackQuery, bot: Bot) -> None:
+    """Обработчик подсказки о команде.
+    
+    Args:
+        callback: Callback запрос
+        bot: Экземпляр бота
+    """
+    # Извлечение ID заявки
+    ticket_id_match = re.search(r"command_hint:(\d+)", callback.data)
+    if not ticket_id_match:
+        await callback.answer("❌ Ошибка: неверный формат запроса.")
+        return
+    
+    try:
+        ticket_id = int(ticket_id_match.group(1))
+    except ValueError:
+        await callback.answer("❌ Ошибка: неверный номер заявки.")
+        return
+    
+    command_text = f"/done {ticket_id}"
+    
+    await callback.answer(f"💬 Команда: {command_text}")
+
+
+@callback_router.callback_query(lambda c: c.data == "help_info")
+async def handle_help_info(callback: CallbackQuery, bot: Bot) -> None:
+    """Обработчик информации о помощи.
+    
+    Args:
+        callback: Callback запрос
+        bot: Экземпляр бота
+    """
+    help_text = (
+        "📖 <b>Как получить VIN отчет:</b>\n\n"
+        "1️⃣ <b>Найдите VIN номер</b> на автомобиле:\n"
+        "• Лобовое стекло (слева внизу)\n"
+        "• Дверная табличка\n"
+        "• В документах на автомобиль\n\n"
+        "2️⃣ <b>Отправьте VIN боту</b> (17 символов)\n\n"
+        "3️⃣ <b>Дождитесь обработки</b> (5-30 минут)\n\n"
+        "4️⃣ <b>Получите PDF отчет</b> в личные сообщения\n\n"
+        "💡 <b>Пример VIN:</b> 1HGBH41JXMN109186"
+    )
+    
+    await callback.message.edit_text(
+        help_text,
+        reply_markup=MainKeyboards.get_help_keyboard(),
+        parse_mode="HTML"
+    )
+    
+    await callback.answer()
+
+
+@callback_router.callback_query(lambda c: c.data == "support_info")
+async def handle_support_info(callback: CallbackQuery, bot: Bot) -> None:
+    """Обработчик информации о поддержке.
+    
+    Args:
+        callback: Callback запрос
+        bot: Экземпляр бота
+    """
+    support_text = (
+        "📞 <b>Поддержка</b>\n\n"
+        "Если у вас возникли вопросы или проблемы:\n\n"
+        "💬 <b>Напишите в поддержку:</b> @support_username\n"
+        "📧 <b>Email:</b> support@example.com\n"
+        "🕒 <b>Время работы:</b> 9:00 - 18:00 МСК\n\n"
+        "📋 <b>При обращении укажите:</b>\n"
+        "• Номер заявки (если есть)\n"
+        "• VIN номер автомобиля\n"
+        "• Описание проблемы"
+    )
+    
+    await callback.message.edit_text(
+        support_text,
+        reply_markup=MainKeyboards.get_help_keyboard(),
+        parse_mode="HTML"
+    )
+    
+    await callback.answer()
+
+
+@callback_router.callback_query(lambda c: c.data == "back_to_start")
+async def handle_back_to_start(callback: CallbackQuery, bot: Bot) -> None:
+    """Обработчик возврата к началу.
+    
+    Args:
+        callback: Callback запрос
+        bot: Экземпляр бота
+    """
+    welcome_text = (
+        "🚗 <b>Добро пожаловать в VIN Report Bot!</b>\n\n"
+        "Я помогу вам получить отчет по VIN номеру вашего автомобиля.\n\n"
+        "📋 <b>Как это работает:</b>\n"
+        "1. Отправьте мне VIN номер (17 символов)\n"
+        "2. Я создам заявку и передам её менеджеру\n"
+        "3. Менеджер обработает заявку и отправит вам PDF отчет\n\n"
+        "💡 <b>Пример VIN:</b> 1HGBH41JXMN109186\n\n"
+        "Просто отправьте VIN номер в следующем сообщении!"
+    )
+    
+    await callback.message.edit_text(
+        welcome_text,
+        reply_markup=MainKeyboards.get_start_keyboard(),
+        parse_mode="HTML"
+    )
+    
+    await callback.answer()

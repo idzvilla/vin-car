@@ -1,0 +1,72 @@
+version: '3.8'
+
+services:
+  # Основной сервис бота
+  bot:
+    build: .
+    container_name: vin-report-bot
+    restart: unless-stopped
+    environment:
+      - BOT_TOKEN=${BOT_TOKEN}
+      - MANAGER_CHAT_ID=${MANAGER_CHAT_ID}
+      - DATABASE_URL=sqlite+aiosqlite:///./data/vin_reports.db
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    depends_on:
+      - postgres
+    networks:
+      - bot-network
+
+  # PostgreSQL база данных (опционально)
+  postgres:
+    image: postgres:15-alpine
+    container_name: vin-report-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=vin_reports
+      - POSTGRES_USER=botuser
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-secure_password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - bot-network
+
+  # Redis для кеширования (будущее использование)
+  redis:
+    image: redis:7-alpine
+    container_name: vin-report-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - bot-network
+
+  # Nginx для reverse proxy (если понадобится webhook)
+  nginx:
+    image: nginx:alpine
+    container_name: vin-report-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - bot
+    networks:
+      - bot-network
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  bot-network:
+    driver: bridge
