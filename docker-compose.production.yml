@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  vin-bot:
+    build: .
+    container_name: vin-bot
+    restart: unless-stopped
+    environment:
+      - BOT_TOKEN=${BOT_TOKEN}
+      - MANAGER_CHAT_ID=${MANAGER_CHAT_ID}
+      - DATABASE_URL=${DATABASE_URL}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - USE_SUPABASE=${USE_SUPABASE:-false}
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_KEY=${SUPABASE_KEY}
+    volumes:
+      - ./env_config:/app/env_config:ro
+      - ./logs:/app/logs
+      - ./data:/app/data
+    networks:
+      - vin-bot-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('https://api.telegram.org/bot${BOT_TOKEN}/getMe')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  vin-bot-network:
+    driver: bridge

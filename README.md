@@ -44,8 +44,28 @@ Telegram бот для обработки VIN отчетов с человече
    ```
 
 4. **Запуск бота**
+
+   **Обычный запуск (для разработки):**
    ```bash
    python main.py
+   ```
+
+   **Фоновый запуск (для продакшена):**
+   ```bash
+   # Запуск в фоновом режиме
+   ./run_bot_background.sh
+   
+   # Или используйте менеджер бота
+   ./bot_manager.sh start
+   ```
+
+   **Управление ботом:**
+   ```bash
+   ./bot_manager.sh start    # Запустить
+   ./bot_manager.sh stop     # Остановить
+   ./bot_manager.sh restart  # Перезапустить
+   ./bot_manager.sh status   # Статус
+   ./bot_manager.sh logs     # Логи
    ```
 
 ### Docker установка

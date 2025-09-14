@@ -1,5 +1,3 @@
-"""Адаптер базы данных для работы с SQLite и Supabase."""
-
 from __future__ import annotations
 
 import asyncio
@@ -13,10 +11,7 @@ from .settings import settings
 
 
 class DatabaseAdapter:
-    """Адаптер для работы с различными базами данных."""
-    
     def __init__(self):
-        """Инициализация адаптера."""
         self.engine = None
         self.session_factory = None
         self.use_supabase = settings.use_supabase

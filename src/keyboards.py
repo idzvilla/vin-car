@@ -1,5 +1,3 @@
-"""Клавиатуры для Telegram бота."""
-
 from __future__ import annotations
 
 from typing import Optional
@@ -9,18 +7,8 @@ from loguru import logger
 
 
 class TicketKeyboards:
-    """Клавиатуры для работы с заявками."""
-    
     @staticmethod
     def get_take_keyboard(ticket_id: int) -> InlineKeyboardMarkup:
-        """Клавиатура для назначения заявки.
-        
-        Args:
-            ticket_id: ID заявки
-            
-        Returns:
-            Inline клавиатура с кнопкой "Take"
-        """
         keyboard = InlineKeyboardMarkup(
             inline_keyboard=[
                 [
@@ -43,14 +31,6 @@ class TicketKeyboards:
     
     @staticmethod
     def get_taken_keyboard(ticket_id: int) -> InlineKeyboardMarkup:
-        """Клавиатура для назначенной заявки.
-        
-        Args:
-            ticket_id: ID заявки
-            
-        Returns:
-            Inline клавиатура только с подсказкой
-        """
         keyboard = InlineKeyboardMarkup(
             inline_keyboard=[
                 [
@@ -67,14 +47,6 @@ class TicketKeyboards:
     
     @staticmethod
     def get_done_hint_keyboard(ticket_id: int) -> InlineKeyboardMarkup:
-        """Клавиатура с подсказкой о завершении.
-        
-        Args:
-            ticket_id: ID заявки
-            
-        Returns:
-            Inline клавиатура с инструкциями
-        """
         keyboard = InlineKeyboardMarkup(
             inline_keyboard=[
                 [
@@ -97,24 +69,12 @@ class TicketKeyboards:
     
     @staticmethod
     def get_empty_keyboard() -> InlineKeyboardMarkup:
-        """Пустая клавиатура для удаления кнопок.
-        
-        Returns:
-            Пустая inline клавиатура
-        """
         return InlineKeyboardMarkup(inline_keyboard=[])
 
 
 class MainKeyboards:
-    """Основные клавиатуры бота."""
-    
     @staticmethod
     def get_start_keyboard() -> InlineKeyboardMarkup:
-        """Клавиатура для команды /start.
-        
-        Returns:
-            Inline клавиатура с приветствием
-        """
         keyboard = InlineKeyboardMarkup(
             inline_keyboard=[
                 [
@@ -137,11 +97,6 @@ class MainKeyboards:
     
     @staticmethod
     def get_help_keyboard() -> InlineKeyboardMarkup:
-        """Клавиатура с информацией о помощи.
-        
-        Returns:
-            Inline клавиатура с помощью
-        """
         keyboard = InlineKeyboardMarkup(
             inline_keyboard=[
                 [
@@ -158,15 +113,8 @@ class MainKeyboards:
 
 
 class ManagerKeyboards:
-    """Клавиатуры для менеджеров."""
-    
     @staticmethod
     def get_manager_actions_keyboard() -> InlineKeyboardMarkup:
-        """Клавиатура с действиями менеджера.
-        
-        Returns:
-            Inline клавиатура с действиями
-        """
         keyboard = InlineKeyboardMarkup(
             inline_keyboard=[
                 [
@@ -190,8 +138,4 @@ class ManagerKeyboards:
         
         logger.debug("Создана клавиатура действий менеджера")
         return keyboard
-
-
-
-
 
