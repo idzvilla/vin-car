@@ -19,7 +19,13 @@ class DatabaseAdapter:
     async def initialize(self) -> None:
         """Инициализация подключения к БД."""
         try:
-            if self.use_supabase and settings.supabase_url and settings.supabase_key:
+            # Проверяем переменные окружения для определения типа БД
+            use_supabase = str(settings.use_supabase).lower() in ('true', '1', 'yes', 'on')
+            has_supabase_config = settings.supabase_url and settings.supabase_key
+            
+            logger.info(f"Настройки БД: use_supabase={use_supabase}, has_config={has_supabase_config}")
+            
+            if use_supabase and has_supabase_config:
                 logger.info("Инициализация Supabase")
                 await self._init_supabase()
             else:

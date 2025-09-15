@@ -4,6 +4,14 @@ import os
 import sys
 from src.bot import main
 
+# Логируем переменные окружения для отладки
+print("🔍 Переменные окружения:")
+for key in ['BOT_TOKEN', 'MANAGER_CHAT_ID', 'DATABASE_URL', 'USE_SUPABASE', 'SUPABASE_URL', 'SUPABASE_KEY']:
+    value = os.getenv(key, 'НЕ УСТАНОВЛЕНО')
+    if key in ['BOT_TOKEN', 'SUPABASE_KEY']:
+        value = f"{value[:10]}..." if len(value) > 10 else value
+    print(f"  {key}={value}")
+
 def check_single_instance():
     pid_file = "/tmp/vin_bot.pid"
     
