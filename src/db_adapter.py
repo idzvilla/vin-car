@@ -24,10 +24,18 @@ class DatabaseAdapter:
             has_supabase_config = settings.supabase_url and settings.supabase_key
             
             logger.info(f"Настройки БД: use_supabase={use_supabase}, has_config={has_supabase_config}")
+            logger.info(f"Supabase URL: {settings.supabase_url}")
+            logger.info(f"Supabase Key: {settings.supabase_key[:20] if settings.supabase_key else 'НЕТ'}...")
             
             if use_supabase and has_supabase_config:
-                logger.info("Инициализация Supabase")
-                await self._init_supabase()
+                try:
+                    logger.info("Попытка инициализации Supabase")
+                    await self._init_supabase()
+                    logger.info("Supabase инициализирован успешно")
+                except Exception as e:
+                    logger.error(f"Ошибка Supabase, переключаемся на SQLite: {e}")
+                    logger.info("Инициализация SQLite как fallback")
+                    await self._init_sqlite()
             else:
                 logger.info("Инициализация SQLite")
                 await self._init_sqlite()
@@ -35,7 +43,7 @@ class DatabaseAdapter:
             logger.info("База данных готова к работе")
             
         except Exception as e:
-            logger.error("Ошибка инициализации базы данных", error=str(e), exc_info=True)
+            logger.error("Критическая ошибка инициализации базы данных", error=str(e), exc_info=True)
             raise
     
     async def _init_sqlite(self) -> None:
@@ -68,8 +76,29 @@ class DatabaseAdapter:
             # Создаем клиент Supabase
             supabase: Client = create_client(settings.supabase_url, settings.supabase_key)
             
-            # Проверяем подключение
-            response = supabase.table('tickets').select('*').limit(1).execute()
+            # Проверяем подключение и создаем таблицу если нужно
+            try:
+                response = supabase.table('tickets').select('*').limit(1).execute()
+                logger.info("Таблица tickets существует")
+            except Exception as e:
+                logger.warning(f"Таблица tickets не найдена или ошибка: {e}")
+                logger.info("Попытка создать таблицу tickets...")
+                # Создаем таблицу через SQL
+                create_table_sql = """
+                CREATE TABLE IF NOT EXISTS tickets (
+                    id SERIAL PRIMARY KEY,
+                    vin VARCHAR(17) NOT NULL,
+                    user_id BIGINT NOT NULL,
+                    username VARCHAR(255),
+                    status VARCHAR(20) NOT NULL DEFAULT 'new',
+                    assignee_id BIGINT,
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+                );
+                """
+                supabase.rpc('exec_sql', {'sql': create_table_sql}).execute()
+                logger.info("Таблица tickets создана")
+            
             logger.info("Supabase подключен успешно")
             
             # Сохраняем клиент для использования
