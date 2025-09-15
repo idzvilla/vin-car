@@ -162,7 +162,7 @@ async def handle_vin_message(message: Message, bot: Bot) -> None:
     username = message.from_user.username or f"user_{user_id}"
     text = message.text.strip()
     
-    logger.info("Получено текстовое сообщение", user_id=user_id, text_length=len(text))
+    logger.info("🔍 Обработка VIN сообщения", user_id=user_id, username=username, text=text, text_length=len(text))
     
     # Валидация VIN
     is_valid, error_message = VINValidator.validate(text)
@@ -186,9 +186,9 @@ async def handle_vin_message(message: Message, bot: Bot) -> None:
     
     try:
         # Создание новой заявки
-        logger.debug("Начинаем создание заявки", user_id=user_id, vin=normalized_vin, username=username)
+        logger.info("🚀 Начинаем создание заявки", user_id=user_id, vin=normalized_vin, username=username)
         ticket_data = await db_adapter.create_ticket(normalized_vin, user_id, username)
-        logger.debug("Заявка создана в базе данных", ticket_data=ticket_data)
+        logger.info("✅ Заявка создана в базе данных", ticket_data=ticket_data)
         
         logger.info(
             "Создана новая заявка",
@@ -211,7 +211,7 @@ async def handle_vin_message(message: Message, bot: Bot) -> None:
         logger.debug("Уведомление пользователю отправлено успешно", user_id=user_id)
         
     except Exception as e:
-        logger.error("Ошибка создания заявки", user_id=user_id, error=str(e), exc_info=True)
+        logger.error("❌ КРИТИЧЕСКАЯ ОШИБКА создания заявки", user_id=user_id, vin=normalized_vin, username=username, error=str(e), exc_info=True)
         await message.answer(
             "❌ <b>Произошла ошибка</b>\n\n"
             "Не удалось создать заявку. Попробуйте позже или обратитесь в поддержку.",

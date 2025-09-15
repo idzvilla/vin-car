@@ -113,10 +113,22 @@ class DatabaseAdapter:
     
     async def create_ticket(self, vin: str, user_id: int, username: str = None) -> Dict[str, Any]:
         """Создание заявки."""
-        if self.use_supabase:
-            return await self._create_ticket_supabase(vin, user_id, username)
-        else:
-            return await self._create_ticket_sqlite(vin, user_id, username)
+        logger.info(f"🎫 Создание заявки: vin={vin}, user_id={user_id}, username={username}, use_supabase={self.use_supabase}")
+        
+        try:
+            if self.use_supabase:
+                logger.info("📊 Используем Supabase для создания заявки")
+                result = await self._create_ticket_supabase(vin, user_id, username)
+            else:
+                logger.info("💾 Используем SQLite для создания заявки")
+                result = await self._create_ticket_sqlite(vin, user_id, username)
+            
+            logger.info(f"✅ Заявка создана успешно: {result}")
+            return result
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка создания заявки: {e}", exc_info=True)
+            raise
     
     async def _create_ticket_sqlite(self, vin: str, user_id: int, username: str = None) -> Dict[str, Any]:
         """Создание заявки в SQLite."""
