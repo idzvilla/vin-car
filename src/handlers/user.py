@@ -158,15 +158,29 @@ async def handle_vin_message(message: Message, bot: Bot) -> None:
         message: Сообщение от пользователя
         bot: Экземпляр бота
     """
+    # Проверяем что пользователь существует
+    if not message.from_user:
+        logger.error("❌ Сообщение без пользователя")
+        await message.answer("❌ Ошибка: не удалось определить пользователя")
+        return
+    
     user_id = message.from_user.id
     username = message.from_user.username or f"user_{user_id}"
-    text = message.text.strip()
+    text = message.text.strip() if message.text else ""
     
     logger.info("🔍 Обработка VIN сообщения", user_id=user_id, username=username, text=text, text_length=len(text))
     
+    # Проверяем что текст не пустой
+    if not text:
+        logger.warning("⚠️ Пустое сообщение от пользователя", user_id=user_id)
+        await message.answer("❌ Пожалуйста, отправьте VIN номер")
+        return
+    
     # Валидация VIN
+    logger.info("🔍 Начинаем валидацию VIN", text=text)
     is_valid, error_message = VINValidator.validate(text)
     if not is_valid:
+        logger.warning("⚠️ VIN не прошел валидацию", text=text, error=error_message)
         await message.answer(
             f"❌ <b>Ошибка валидации VIN</b>\n\n{error_message}\n\n"
             "💡 <b>Правильный формат:</b> 17 символов без I, O, Q\n"
@@ -176,7 +190,9 @@ async def handle_vin_message(message: Message, bot: Bot) -> None:
         return
     
     # Нормализация VIN
+    logger.info("✅ VIN прошел валидацию, нормализуем", text=text)
     normalized_vin = VINValidator.normalize(text)
+    logger.info("✅ VIN нормализован", normalized_vin=normalized_vin)
     
     # Создание заявки через db_adapter
     from src.db_adapter import db_adapter
