@@ -13,8 +13,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db_session
-from ..keyboards import MainKeyboards, TicketKeyboards
+from ..keyboards import MainKeyboards, PaymentKeyboards, TicketKeyboards
 from ..models import Ticket
+from ..payment_service import PaymentService
 from ..settings import settings
 from ..validators import UserInputValidator, VINValidator
 
@@ -35,9 +36,25 @@ async def cmd_start(message: Message, bot: Bot) -> None:
     
     logger.info("Пользователь запустил бота", user_id=user_id, username=username)
     
+    # Проверяем подписку пользователя
+    subscription = await PaymentService.get_user_subscription(user_id)
+    
+    if subscription and subscription.can_generate_report():
+        subscription_info = (
+            f"📊 <b>Ваша подписка:</b> {subscription.reports_remaining} отчетов\n"
+            f"📈 <b>Всего куплено:</b> {subscription.total_reports}\n\n"
+        )
+    else:
+        subscription_info = (
+            "💳 <b>Для получения отчетов необходима оплата:</b>\n"
+            "• 1 отчет - $2.00\n"
+            "• 100 отчетов - $100.00 (экономия $100!)\n\n"
+        )
+    
     welcome_text = (
         "🚗 <b>Добро пожаловать в VIN Report Bot!</b>\n\n"
         "Я помогу вам получить отчет по VIN номеру вашего автомобиля.\n\n"
+        f"{subscription_info}"
         "📋 <b>Как это работает:</b>\n"
         "1. Отправьте мне VIN номер (17 символов)\n"
         "2. Я создам заявку и передам её менеджеру\n"
@@ -193,6 +210,20 @@ async def handle_vin_message(message: Message, bot: Bot) -> None:
     logger.info("✅ VIN прошел валидацию, нормализуем", text=text)
     normalized_vin = VINValidator.normalize(text)
     logger.info("✅ VIN нормализован", normalized_vin=normalized_vin)
+    
+    # Проверяем, может ли пользователь сгенерировать отчет
+    can_generate = await PaymentService.can_user_generate_report(user_id)
+    if not can_generate:
+        logger.info("💳 Пользователь не имеет активной подписки, предлагаем оплату", user_id=user_id)
+        await _show_payment_options(message, bot, normalized_vin)
+        return
+    
+    # Используем один отчет из подписки
+    report_used = await PaymentService.use_user_report(user_id)
+    if not report_used:
+        logger.error("❌ Не удалось использовать отчет из подписки", user_id=user_id)
+        await message.answer("❌ Ошибка: не удалось использовать отчет. Обратитесь в поддержку.")
+        return
     
     # Создание заявки через db_adapter
     from src.db_adapter import db_adapter
@@ -405,3 +436,145 @@ def _get_status_text(status: str) -> str:
         "DONE": "завершена"
     }
     return status_map.get(status, "неизвестно")
+
+
+async def _show_payment_options(message: Message, bot: Bot, vin: str) -> None:
+    """Показать опции оплаты пользователю.
+    
+    Args:
+        message: Сообщение от пользователя
+        bot: Экземпляр бота
+        vin: VIN номер для которого нужен отчет
+    """
+    user_id = message.from_user.id if message.from_user else 0
+    
+    payment_text = (
+        f"💳 <b>Оплата отчета по VIN: {vin}</b>\n\n"
+        "Для получения отчета необходимо произвести оплату:\n\n"
+        "💳 <b>1 отчет - $2.00</b>\n"
+        "📦 <b>100 отчетов - $100.00</b> (экономия $100!)\n\n"
+        "Выберите тариф:"
+    )
+    
+    keyboard = PaymentKeyboards.get_payment_options_keyboard()
+    
+    # Сохраняем VIN в callback_data для последующего использования
+    # Пока что используем простой подход - сохраняем в тексте сообщения
+    
+    await message.answer(
+        payment_text,
+        reply_markup=keyboard,
+        parse_mode="HTML"
+    )
+    
+    logger.info("💳 Показаны опции оплаты", user_id=user_id, vin=vin)
+
+
+async def _handle_payment_selection(callback_query, payment_type: str) -> None:
+    """Обработка выбора тарифа оплаты.
+    
+    Args:
+        callback_query: Callback query от пользователя
+        payment_type: Тип платежа (single или bulk)
+    """
+    user_id = callback_query.from_user.id
+    username = callback_query.from_user.username or f"user_{user_id}"
+    
+    logger.info("💳 Пользователь выбрал тариф", user_id=user_id, payment_type=payment_type)
+    
+    if payment_type == "cancel":
+        await callback_query.message.edit_text(
+            "❌ Оплата отменена. Для получения отчета выберите тариф и произведите оплату.",
+            reply_markup=PaymentKeyboards.get_payment_options_keyboard()
+        )
+        return
+    
+    # Создаем платеж
+    try:
+        payment = await PaymentService.create_payment(user_id, payment_type)
+        
+        # Показываем информацию о платеже
+        price = PaymentService.format_price(payment.amount)
+        description = PaymentService.get_payment_description(payment_type)
+        
+        payment_text = (
+            f"💳 <b>Платеж создан</b>\n\n"
+            f"📋 <b>Тариф:</b> {description}\n"
+            f"💰 <b>Сумма:</b> {price}\n"
+            f"🆔 <b>ID платежа:</b> {payment.id}\n\n"
+            f"⚠️ <b>Внимание:</b> Это демо-версия!\n"
+            f"Для завершения платежа нажмите кнопку подтверждения ниже.\n"
+            f"В реальной версии здесь будет интеграция с платежной системой."
+        )
+        
+        keyboard = PaymentKeyboards.get_payment_confirmation_keyboard(payment_type, payment.id)
+        
+        await callback_query.message.edit_text(
+            payment_text,
+            reply_markup=keyboard,
+            parse_mode="HTML"
+        )
+        
+        logger.info("💳 Платеж создан", payment_id=payment.id, user_id=user_id, payment_type=payment_type)
+        
+    except Exception as e:
+        logger.error("❌ Ошибка создания платежа", user_id=user_id, error=str(e))
+        await callback_query.answer("❌ Ошибка создания платежа. Попробуйте еще раз.")
+
+
+async def _handle_payment_confirmation(callback_query, payment_id: int) -> None:
+    """Обработка подтверждения платежа.
+    
+    Args:
+        callback_query: Callback query от пользователя
+        payment_id: ID платежа
+    """
+    user_id = callback_query.from_user.id
+    
+    logger.info("💳 Подтверждение платежа", payment_id=payment_id, user_id=user_id)
+    
+    try:
+        # Завершаем платеж
+        success = await PaymentService.complete_payment(payment_id)
+        
+        if success:
+            # Получаем информацию о подписке
+            subscription = await PaymentService.get_user_subscription(user_id)
+            
+            success_text = (
+                f"✅ <b>Платеж успешно завершен!</b>\n\n"
+                f"🎉 Ваша подписка активирована!\n"
+                f"📊 <b>Доступно отчетов:</b> {subscription.reports_remaining}\n"
+                f"📈 <b>Всего куплено:</b> {subscription.total_reports}\n\n"
+                f"Теперь вы можете отправлять VIN номера для получения отчетов!"
+            )
+            
+            await callback_query.message.edit_text(
+                success_text,
+                parse_mode="HTML"
+            )
+            
+            logger.info("✅ Платеж завершен успешно", payment_id=payment_id, user_id=user_id)
+        else:
+            await callback_query.answer("❌ Ошибка завершения платежа. Обратитесь в поддержку.")
+            
+    except Exception as e:
+        logger.error("❌ Ошибка подтверждения платежа", payment_id=payment_id, user_id=user_id, error=str(e))
+        await callback_query.answer("❌ Ошибка подтверждения платежа. Обратитесь в поддержку.")
+
+
+async def _handle_payment_cancellation(callback_query, payment_id: int) -> None:
+    """Обработка отмены платежа.
+    
+    Args:
+        callback_query: Callback query от пользователя
+        payment_id: ID платежа
+    """
+    user_id = callback_query.from_user.id
+    
+    logger.info("❌ Отмена платежа", payment_id=payment_id, user_id=user_id)
+    
+    await callback_query.message.edit_text(
+        "❌ Платеж отменен.\n\nДля получения отчета выберите тариф и произведите оплату.",
+        reply_markup=PaymentKeyboards.get_payment_options_keyboard()
+    )

@@ -139,3 +139,80 @@ class ManagerKeyboards:
         logger.debug("Создана клавиатура действий менеджера")
         return keyboard
 
+
+class PaymentKeyboards:
+    @staticmethod
+    def get_payment_options_keyboard() -> InlineKeyboardMarkup:
+        """Клавиатура для выбора тарифа оплаты."""
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="💳 1 отчет - $2",
+                        callback_data="payment:single"
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        text="📦 100 отчетов - $100",
+                        callback_data="payment:bulk"
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        text="❌ Отмена",
+                        callback_data="payment:cancel"
+                    )
+                ]
+            ]
+        )
+        
+        logger.debug("Создана клавиатура выбора тарифа")
+        return keyboard
+    
+    @staticmethod
+    def get_payment_confirmation_keyboard(payment_type: str, payment_id: int) -> InlineKeyboardMarkup:
+        """Клавиатура для подтверждения платежа."""
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="✅ Подтвердить платеж",
+                        callback_data=f"confirm_payment:{payment_id}"
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        text="❌ Отменить",
+                        callback_data=f"cancel_payment:{payment_id}"
+                    )
+                ]
+            ]
+        )
+        
+        logger.debug("Создана клавиатура подтверждения платежа", payment_type=payment_type, payment_id=payment_id)
+        return keyboard
+    
+    @staticmethod
+    def get_payment_status_keyboard() -> InlineKeyboardMarkup:
+        """Клавиатура для проверки статуса платежа."""
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="🔄 Проверить статус",
+                        callback_data="check_payment_status"
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        text="🔙 Назад",
+                        callback_data="back_to_payment"
+                    )
+                ]
+            ]
+        )
+        
+        logger.debug("Создана клавиатура статуса платежа")
+        return keyboard
+

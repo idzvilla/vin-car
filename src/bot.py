@@ -27,21 +27,33 @@ class VINReportBot:
             logger.info("Инициализация VIN Report Bot")
             
             self._setup_logging()
+            logger.debug("Логирование настроено")
             
             from src.db_adapter import db_adapter
             await db_adapter.initialize()
+            logger.debug("База данных инициализирована")
             
-            self.bot = Bot(
-                token=settings.bot_token,
-                default=DefaultBotProperties(
-                    parse_mode=ParseMode.HTML
-                )
-            )
+            # Инициализируем db_manager для PaymentService
+            from src.db import init_db
+            init_db()
+            logger.debug("DB manager инициализирован")
+            
+            try:
+                logger.debug(f"Создание бота с токеном: {settings.bot_token[:10]}...")
+                self.bot = Bot(token=settings.bot_token)
+                logger.debug("Бот создан")
+            except Exception as e:
+                logger.error("Ошибка создания бота", error=str(e), exc_info=True)
+                raise
             
             self.dispatcher = Dispatcher()
+            logger.debug("Диспетчер создан")
             
             self._register_routers()
+            logger.debug("Роутеры зарегистрированы")
+            
             self._setup_signal_handlers()
+            logger.debug("Обработчики сигналов настроены")
             
             logger.info("VIN Report Bot инициализирован успешно")
             

@@ -6,7 +6,7 @@ from loguru import logger
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session
 
-from .models import Base
+from .models import Base, Payment, UserSubscription
 from .settings import settings
 
 

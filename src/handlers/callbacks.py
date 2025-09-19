@@ -13,9 +13,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db_session
-from ..keyboards import TicketKeyboards
+from ..keyboards import PaymentKeyboards, TicketKeyboards
 from ..models import Ticket
 from ..settings import settings
+from .user import _handle_payment_cancellation, _handle_payment_confirmation, _handle_payment_selection
 
 # Роутер для callback'ов
 callback_router = Router()
@@ -271,6 +272,89 @@ async def handle_back_to_start(callback: CallbackQuery, bot: Bot) -> None:
     await callback.message.edit_text(
         welcome_text,
         reply_markup=MainKeyboards.get_start_keyboard(),
+        parse_mode="HTML"
+    )
+    
+    await callback.answer()
+
+
+# Обработчики платежей
+@callback_router.callback_query(lambda c: c.data.startswith("payment:"))
+async def handle_payment_selection(callback: CallbackQuery) -> None:
+    """Обработчик выбора тарифа оплаты."""
+    payment_type = callback.data.split(":", 1)[1]
+    await _handle_payment_selection(callback, payment_type)
+    await callback.answer()
+
+
+@callback_router.callback_query(lambda c: c.data.startswith("confirm_payment:"))
+async def handle_payment_confirmation(callback: CallbackQuery) -> None:
+    """Обработчик подтверждения платежа."""
+    try:
+        payment_id = int(callback.data.split(":", 1)[1])
+        await _handle_payment_confirmation(callback, payment_id)
+    except ValueError:
+        await callback.answer("❌ Ошибка: неверный ID платежа.")
+    await callback.answer()
+
+
+@callback_router.callback_query(lambda c: c.data.startswith("cancel_payment:"))
+async def handle_payment_cancellation(callback: CallbackQuery) -> None:
+    """Обработчик отмены платежа."""
+    try:
+        payment_id = int(callback.data.split(":", 1)[1])
+        await _handle_payment_cancellation(callback, payment_id)
+    except ValueError:
+        await callback.answer("❌ Ошибка: неверный ID платежа.")
+    await callback.answer()
+
+
+@callback_router.callback_query(lambda c: c.data == "check_payment_status")
+async def handle_check_payment_status(callback: CallbackQuery) -> None:
+    """Обработчик проверки статуса платежа."""
+    user_id = callback.from_user.id
+    
+    from ..payment_service import PaymentService
+    
+    subscription = await PaymentService.get_user_subscription(user_id)
+    
+    if subscription:
+        status_text = (
+            f"📊 <b>Статус вашей подписки</b>\n\n"
+            f"📈 <b>Всего куплено отчетов:</b> {subscription.total_reports}\n"
+            f"📊 <b>Осталось отчетов:</b> {subscription.reports_remaining}\n"
+            f"📅 <b>Подписка создана:</b> {subscription.created_at.strftime('%d.%m.%Y %H:%M')}\n\n"
+            f"✅ Подписка активна! Можете отправлять VIN номера."
+        )
+    else:
+        status_text = (
+            "❌ <b>У вас нет активной подписки</b>\n\n"
+            "Для получения отчетов необходимо произвести оплату.\n"
+            "Выберите тариф и оплатите подписку."
+        )
+    
+    await callback.message.edit_text(
+        status_text,
+        reply_markup=PaymentKeyboards.get_payment_status_keyboard(),
+        parse_mode="HTML"
+    )
+    
+    await callback.answer()
+
+
+@callback_router.callback_query(lambda c: c.data == "back_to_payment")
+async def handle_back_to_payment(callback: CallbackQuery) -> None:
+    """Обработчик возврата к выбору тарифа."""
+    payment_text = (
+        "💳 <b>Выберите тариф для оплаты</b>\n\n"
+        "💳 <b>1 отчет - $2.00</b>\n"
+        "📦 <b>100 отчетов - $100.00</b> (экономия $100!)\n\n"
+        "Выберите тариф:"
+    )
+    
+    await callback.message.edit_text(
+        payment_text,
+        reply_markup=PaymentKeyboards.get_payment_options_keyboard(),
         parse_mode="HTML"
     )
     

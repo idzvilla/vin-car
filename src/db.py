@@ -85,10 +85,10 @@ class DatabaseManager:
         try:
             yield session
         except Exception:
-            session.rollback()
+            await session.rollback()
             raise
         finally:
-            session.close()
+            await session.close()
 
 
 db_manager = DatabaseManager(settings.database_url)
